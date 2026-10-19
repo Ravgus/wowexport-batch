@@ -108,6 +108,32 @@
 		}
 	};
 
+	// build labels on the source screen start with the product title (wow.export 0.2.19 constants.PRODUCTS)
+	const PRODUCT_TITLES = {
+		wow: 'World of Warcraft', wowt: 'PTR: World of Warcraft', wowxptr: 'PTR 2: World of Warcraft',
+		wow_beta: 'Beta: World of Warcraft', wow_classic: 'World of Warcraft Classic',
+		wow_classic_ptr: 'PTR: World of Warcraft Classic', wow_classic_era: 'World of Warcraft Classic Era'
+	};
+
+	// Blizzard's CDN instead of a local install: for builds you don't have installed, such as the PTR
+	const open_cdn = async (region_tag, product) => {
+		const ctx = make_ctx(modules.source_select);
+		await wait_for('CDN regions', () => core.view.cdnRegions?.some((r) => r.tag === region_tag), 60000, 250);
+		core.view.lockCDNRegion = true;          // otherwise the region ping race may switch it
+		core.view.selectedCDNRegion = core.view.cdnRegions.find((r) => r.tag === region_tag);
+		await ctx.click_source_remote();
+		await wait_for('CDN builds', () => core.view.availableRemoteBuilds?.length > 0, 120000, 500);
+		const title = PRODUCT_TITLES[product];
+		// "PTR: World of Warcraft 12.1.7.70424" or "... (EU) 12.1.7.70424": the title, then the version
+		const escaped = (title || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		const pattern = new RegExp('^' + escaped + ' (\\(\\w+\\) )?\\d');
+		const build = core.view.availableRemoteBuilds.find((b) => title && pattern.test(String(b.label)));
+		if (!build)
+			throw new Error('no CDN build for ' + product + ': ' + core.view.availableRemoteBuilds.map((b) => b.label).join(', '));
+		log('CDN build:', build.label);
+		await ctx.load_install(build.buildIndex);
+	};
+
 	const export_models = async (job, result) => {
 		modules.tab_models.setActive();
 		await wait_for('models tab', () => core.view.modelViewerContext && core.view.listfileModels?.length > 0 && !core.view.isBusy, 600000, 500);
@@ -122,7 +148,8 @@
 					return name.endsWith('[' + model.fdid + ']');
 				return name === wanted || name.startsWith(wanted + ' ');
 			});
-			const label = model.path || 'fdid:' + model.fdid;
+			// the same model with another skin is another asset: "fdid:143332#53296"
+			const label = (model.path || 'fdid:' + model.fdid) + (model.display ? '#' + model.display : '');
 			if (!entry) {
 				result.errors.push('model not in listfile: ' + label);
 				log('model not in listfile:', label);
@@ -202,10 +229,13 @@
 				exportWMOMeta: true
 			});
 
-			await make_ctx(modules.source_select).open_local_install(job.install.path, job.install.product);
-			await wait_for('CASC load', () => core.view.installType === modules.InstallType.CASC && core.view.casc, 600000, 500);
-			result.build = core.view.casc.build?.Version ?? null;
-			log('install loaded:', job.install.path, result.build);
+			if (job.install.cdn)
+				await open_cdn(job.install.cdn, job.install.product);
+			else
+				await make_ctx(modules.source_select).open_local_install(job.install.path, job.install.product);
+			await wait_for('CASC load', () => core.view.installType === modules.InstallType.CASC && core.view.casc, 1800000, 500);
+			result.build = core.view.casc.build?.Version ?? core.view.casc.build?.VersionsName ?? null;   // local / CDN build
+			log('install loaded:', job.install.cdn ? 'CDN ' + job.install.cdn + ' ' + job.install.product : job.install.path, result.build);
 
 			if (job.creatures?.length)
 				await export_creatures(job, result);

@@ -4,7 +4,13 @@ Starts a separate wow.export instance with its own profile and its own app folde
 runner.js is injected, and runs the job: creatures by NPC ID and models by game path or
 FileDataID. Your regular wow.export and its settings are left untouched.
 
-usage: python3 run_job.py job.json [--export-dir DIR] [--install PATH] [--product wow]
+usage: python3 run_job.py job.json [--export-dir DIR] [--install PATH | --cdn REGION] [--product wow]
+
+An entry with "product" (default "wow") is exported only by a run of that product, so one job can
+mix assets from your install and from a build you don't have, such as the PTR:
+    python3 run_job.py job.json                         # entries of your install
+    python3 run_job.py job.json --cdn eu --product wowt  # entries with "product": "wowt", from the CDN
+--only exports just the listed entries (manifest keys), e.g. to redo a few failed ones.
 """
 
 import argparse
@@ -47,6 +53,12 @@ def find_export_dir(args, job, job_path):
     if read_wx_config().get("exportDirectory"):
         return Path(read_wx_config()["exportDirectory"])
     sys.exit("no export directory: pass --export-dir or set export_dir in the job")
+
+
+def model_key(model):
+    """Manifest key of a model entry; runner.js builds the same one."""
+    label = model.get("path") or f"fdid:{model['fdid']}"
+    return "model:" + label + (f"#{model['display']}" if model.get("display") else "")
 
 
 def check_job(job):
@@ -120,8 +132,11 @@ def main():
                         "relative to the job file, else your wow.export's export directory)")
     parser.add_argument("--install", help="WoW install folder (default: WOW_INSTALL, else the most recent "
                         "install of this product in your wow.export)")
-    parser.add_argument("--product", help="CASC product: wow, wow_classic, wow_classic_era, ... (default: wow)")
+    parser.add_argument("--cdn", help="read from Blizzard's CDN in this region (eu, us, kr, tw, cn) instead of an install")
+    parser.add_argument("--product", help="CASC product: wow, wowt (PTR), wow_classic, wow_classic_era, ... (default: wow)")
     parser.add_argument("--manifest", help="asset manifest to update (default: exported.json in the export directory)")
+    parser.add_argument("--only", help="comma-separated asset keys to export, as in the manifest: "
+                        "creature:20350,model:fdid:143332#53296,model:world/.../file.m2")
     parser.add_argument("--timeout", type=int, default=1800, help="seconds for the whole job")
     args = parser.parse_args()
 
@@ -135,11 +150,26 @@ def main():
 
     run_dir = STATE / "runs" / time.strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True)
+    mine = lambda entry: entry.get("product", job.get("product", "wow")) == args.product
+    wanted = set(args.only.split(",")) if args.only else None
+    picked = lambda key: wanted is None or key in wanted
+    creatures = [c for c in job.get("creatures", []) if mine(c) and picked(f"creature:{c['id']}")]
+    models = [m for m in job.get("models", []) if mine(m) and picked(model_key(m))]
+    if wanted:
+        known = {f"creature:{c['id']}" for c in job.get("creatures", [])} | {model_key(m) for m in job.get("models", [])}
+        for key in sorted(wanted - known):
+            print(f"--only: no entry {key} in the job")
+    skipped = len(job.get("creatures", [])) + len(job.get("models", [])) - len(creatures) - len(models)
+    if skipped:
+        print(f"{skipped} entries belong to other products, skipped")
+    if not creatures and not models:
+        sys.exit(f"no entries for product '{args.product}'")
+    install = {"cdn": args.cdn, "product": args.product} if args.cdn else {"path": find_install(args, job), "product": args.product}
     full_job = {
-        "install": {"path": find_install(args, job), "product": args.product},
+        "install": install,
         "export_dir": str(export_dir),
-        "creatures": job.get("creatures", []),
-        "models": job.get("models", []),
+        "creatures": creatures,
+        "models": models,
         "creature_format": job.get("creature_format", "GLTF"),
         "log_geosets": job.get("log_geosets", False),
     }

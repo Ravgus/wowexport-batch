@@ -10,7 +10,7 @@ wow.export is a GUI application, and its remote control protocol (RCP) was remov
 
 1. `run_job.py` builds an app folder in `~/.cache/wowexport-batch/app`: symlinks to your installed wow.export files, a copy of the launcher and its own `package.json`, which tells NW.js to inject `runner.js` into the page (`inject_js_end`).
 2. It starts that copy with its own profile (`--user-data-dir`) and auto-update turned off. Your wow.export install, its settings and its cache stay as they were.
-3. `runner.js` waits for the app to load, opens the local game install and exports each entry of the job through the same tab methods the Export button calls. It records which file each asset produced, writes a result file and quits.
+3. `runner.js` waits for the app to load, opens the local game install (or Blizzard's CDN with `--cdn`) and exports each entry of the job through the same tab methods the Export button calls. It records which file each asset produced, writes a result file and quits.
 
 `runner.js` only performs these fixed steps. Nothing from the job file is run as code.
 
@@ -36,7 +36,9 @@ python3 wowexport-batch/run_job.py job.json --export-dir ~/exports --install "/p
 | --- | --- |
 | `--export-dir DIR` | `export_dir` from the job (relative to the job file), else the export directory of your regular wow.export |
 | `--install PATH` | `WOW_INSTALL`, else `install` from the job, else your wow.export's most recent install of this product |
-| `--product NAME` | `product` from the job, else `wow` (other values: `wow_classic`, `wow_classic_era`, ...) |
+| `--product NAME` | `product` from the job, else `wow` (other values: `wowt` for the PTR, `wow_classic`, `wow_classic_era`, ...) |
+| `--only KEYS` | all: export just these entries, by manifest key (`creature:20350`, `model:fdid:143332#53296`, `model:<path>`), e.g. to redo a few failed ones. |
+| `--cdn REGION` | none: read from Blizzard's CDN in this region (`eu`, `us`, `kr`, `tw`, `cn`) instead of a local install, for builds you don't have installed. Files are downloaded on demand into wow.export's cache. |
 | `--manifest FILE` | `exported.json` in the export directory |
 | `--timeout SEC` | 1800 for the whole job |
 
@@ -76,7 +78,8 @@ Entry fields:
 | `id` | Creature: the NPC ID, as on Wowhead (`/npc=26499`). Required. |
 | `path` or `fdid` | Model: the game path from the listfile, or the FileDataID. One of them is required. |
 | `format` | `GLTF` (default), `GLB`, `OBJ` or `STL`. |
-| `display` | Model: an ItemDisplayInfo ID. Selects the skin whose label ends with `(<display>)`, for item models with several textures. |
+| `product` | The CASC product this entry comes from (default: the job's `product`, else `wow`). A run exports only the entries of its own product, so a job can mix your install with, say, the PTR: run it once as usual and once with `--cdn eu --product wowt`. |
+| `display` | Model: an ItemDisplayInfo ID. Selects the skin whose label ends with `(<display>)`, for item models with several textures. wow.export labels a skin with the lowest ItemDisplayInfo ID that has this model and material, so an NPC's newer display ID may need mapping to it. The asset key then ends with `#<display>` (`model:fdid:143332#53296`), so one model can be exported with several skins. |
 | `groups` | WMO: indices of the groups to export (their order in the root WMO), for example a few rooms of a whole city. Default: all groups. Doodads are not filtered by group: every doodad of the turned-on sets is exported. |
 
 Any other keys are ignored, so the job file can also carry your own notes and import settings.
@@ -98,7 +101,7 @@ The tool sets these wow.export options in its own profile: animations are export
 ## Limitations
 
 - wow.export has no automation API, so `runner.js` relies on its internals (`core.view`, `modules.tab_*` and their methods). A wow.export update can break it; the script warns when the installed version is not one it was tested with.
-- Local installs only. wow.export's CDN mode is not supported yet.
+- CDN runs open the newest build of the product in that region; an older build can't be picked yet.
 - Linux only: the launcher name, config paths and the cleanup of leftover processes through `/proc` are Linux-specific.
 - Not headless: wow.export needs a display.
 - What wow.export leaves out of a creature export is left out here too. For example, NPC weapons are not part of the creature; export them as item models.
