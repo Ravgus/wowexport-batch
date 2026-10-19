@@ -77,10 +77,11 @@ Entry fields:
 | `path` or `fdid` | Model: the game path from the listfile, or the FileDataID. One of them is required. |
 | `format` | `GLTF` (default), `GLB`, `OBJ` or `STL`. |
 | `display` | Model: an ItemDisplayInfo ID. Selects the skin whose label ends with `(<display>)`, for item models with several textures. |
+| `groups` | WMO: indices of the groups to export (their order in the root WMO), for example a few rooms of a whole city. Default: all groups. Doodads are not filtered by group: every doodad of the turned-on sets is exported. |
 
 Any other keys are ignored, so the job file can also carry your own notes and import settings.
 
-The tool sets these wow.export options in its own profile: animations are exported, M2 and WMO metadata JSON is written, existing files are overwritten and paths use forward slashes. For a WMO, all doodad sets are turned on.
+The tool sets these wow.export options in its own profile: animations are exported, M2 and WMO metadata JSON is written, existing files are overwritten and paths use forward slashes. For a WMO, all doodad sets are turned on, and all groups unless `groups` is given.
 
 ## Output
 

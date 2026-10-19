@@ -135,6 +135,17 @@
 			if (game_path.endsWith('.wmo') && Array.isArray(core.view.modelViewerWMOSets)) {
 				for (const set of core.view.modelViewerWMOSets)
 					set.checked = true;
+				// only the listed groups (indices in the root WMO), e.g. a few rooms of a whole city
+				if (Array.isArray(model.groups) && Array.isArray(core.view.modelViewerWMOGroups)) {
+					for (const group of core.view.modelViewerWMOGroups)
+						group.checked = model.groups.includes(group.groupIndex);
+					const found = core.view.modelViewerWMOGroups.filter((g) => g.checked).length;
+					if (found !== model.groups.length) {
+						result.errors.push('wmo groups: found ' + found + ' of ' + model.groups.length + ' for ' + label);
+						log('wmo groups missing:', label, JSON.stringify(model.groups));
+						continue;
+					}
+				}
 			}
 			if (model.display) {
 				// the item skin with the wanted appearance: its label ends with "(<ItemDisplayInfo ID>)"
