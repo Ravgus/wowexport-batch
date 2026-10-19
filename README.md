@@ -78,6 +78,8 @@ Entry fields:
 | `id` | Creature: the NPC ID, as on Wowhead (`/npc=26499`). Required. |
 | `path` or `fdid` | Model: the game path from the listfile, or the FileDataID. One of them is required. |
 | `format` | `GLTF` (default), `GLB`, `OBJ` or `STL`. |
+| `equipment_off` | Creature: inventory slots of the NPC's equipment to leave off (1 head, 3 shoulders, 5 chest, ...), e.g. an invisible helmet that only hides the hair. |
+| `geosets_on`, `geosets_off` | Creature: geoset IDs to switch on or off after the equipment is applied, e.g. a hairstyle (`7` = hair 7) that wow.export's equipment refresh switched off, or another beard (`geosets_on: [106], geosets_off: [104]`). The NPC's own hairstyle and beard are in the `CreatureDisplayInfoOption` table. |
 | `product` | The CASC product this entry comes from (default: the job's `product`, else `wow`). A run exports only the entries of its own product, so a job can mix your install with, say, the PTR: run it once as usual and once with `--cdn eu --product wowt`. |
 | `display` | Model: an ItemDisplayInfo ID. Selects the skin whose label ends with `(<display>)`, for item models with several textures. wow.export labels a skin with the lowest ItemDisplayInfo ID that has this model and material, so an NPC's newer display ID may need mapping to it. The asset key then ends with `#<display>` (`model:fdid:143332#53296`), so one model can be exported with several skins. |
 | `groups` | WMO: indices of the groups to export (their order in the root WMO), for example a few rooms of a whole city. Default: all groups. Doodads are not filtered by group: every doodad of the turned-on sets is exported. |

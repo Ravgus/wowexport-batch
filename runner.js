@@ -112,12 +112,29 @@
 			// equipment list changes: on the first preview it skips them because is_character_model is still false.
 			// Replacing the list with a copy runs that refresh, and the export takes the preview's geosets.
 			if (Array.isArray(core.view.creatureViewerEquipment) && core.view.creatureViewerEquipment.length) {
-				core.view.creatureViewerEquipment = core.view.creatureViewerEquipment.map((item) => Object.assign({}, item));
+				// equipment_off: inventory slots to take off (1 = head: e.g. an invisible helmet that only hides the hair)
+				const off = new Set(creature.equipment_off || []);
+				core.view.creatureViewerEquipment = core.view.creatureViewerEquipment.map((item) =>
+					Object.assign({}, item, off.has(item.id) ? { checked: false } : {}));
 				await sleep(3000);
 				await wait_preview('creature equipment ' + creature.id);
 			}
-			if (job.log_geosets)
+			// geosets_on / geosets_off: geosets to switch on or off after the equipment refresh (it can clear
+			// a whole group, e.g. the hair); a different beard is geosets_on plus geosets_off for the default one
+			const on = creature.geosets_on || [], off = creature.geosets_off || [];
+			if ((on.length || off.length) && Array.isArray(core.view.creatureViewerGeosets)) {
+				for (const geoset of core.view.creatureViewerGeosets) {
+					if (on.includes(geoset.id))
+						geoset.checked = true;
+					if (off.includes(geoset.id))
+						geoset.checked = false;
+				}
+				await wait_preview('creature geosets ' + creature.id);
+			}
+			if (job.log_geosets) {
+				log('equipment', creature.id, JSON.stringify((core.view.creatureViewerEquipment || []).map((e) => e.label + (e.checked ? '+' : '-'))));
 				log('geosets', creature.id, JSON.stringify((core.view.creatureViewerGeosets || []).map((g) => g.id + (g.checked ? '+' : '-'))));
+			}
 			if (core.view.selectionCreatures.length === 0) {
 				result.errors.push('selection was reset: ' + entry);
 				log('selection was reset:', entry);
