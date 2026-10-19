@@ -73,6 +73,27 @@
 		await sleep(1500);
 	};
 
+	// Character-model NPCs get their baked textures as "data-<type>.png" next to the glTF, the same names for
+	// every creature, so the next export overwrites them. Give them the creature's name and fix the glTF.
+	const own_textures = (gltf_path) => {
+		if (!gltf_path.endsWith('.gltf'))
+			return;
+		const dir = path.dirname(gltf_path);
+		const stem = path.basename(gltf_path, '.gltf');
+		const gltf = JSON.parse(fs.readFileSync(gltf_path, 'utf8'));
+		let renamed = 0;
+		for (const image of gltf.images || []) {
+			if (!image.uri || !/^data-\d+\.png$/.test(image.uri))
+				continue;
+			const own = stem + '_' + image.uri;
+			fs.renameSync(path.join(dir, image.uri), path.join(dir, own));
+			image.uri = own;
+			renamed++;
+		}
+		if (renamed)
+			fs.writeFileSync(gltf_path, JSON.stringify(gltf, null, '\t'));
+	};
+
 	const export_creatures = async (job, result) => {
 		modules.tab_creatures.setActive();
 		await wait_for('creature list', () => core.view.listfileCreatures?.length > 0 && !core.view.isBusy, 600000, 500);
@@ -87,6 +108,14 @@
 			}
 			core.view.selectionCreatures = [entry];
 			await wait_preview('creature preview ' + creature.id);
+			// wow.export 0.2.19 applies an NPC's equipment geosets (robe skirts, sleeves, boots) only when its
+			// equipment list changes: on the first preview it skips them because is_character_model is still false.
+			// Replacing the list with a copy runs that refresh, and the export takes the preview's geosets.
+			if (Array.isArray(core.view.creatureViewerEquipment) && core.view.creatureViewerEquipment.length) {
+				core.view.creatureViewerEquipment = core.view.creatureViewerEquipment.map((item) => Object.assign({}, item));
+				await sleep(3000);
+				await wait_preview('creature equipment ' + creature.id);
+			}
 			if (job.log_geosets)
 				log('geosets', creature.id, JSON.stringify((core.view.creatureViewerGeosets || []).map((g) => g.id + (g.checked ? '+' : '-'))));
 			if (core.view.selectionCreatures.length === 0) {
@@ -103,6 +132,7 @@
 				log('unexpected output for creature', creature.id, main.length);
 				continue;
 			}
+			own_textures(main[0]);
 			result.assets.push({ key: 'creature:' + creature.id, entry, file: path.relative(job.export_dir, main[0]) });
 			log('exported creature:', entry);
 		}
