@@ -94,65 +94,108 @@
 			fs.writeFileSync(gltf_path, JSON.stringify(gltf, null, '\t'));
 	};
 
+	// appearance: a character-model NPC on another body and with another look, in its own equipment. For example
+	// an NPC on a body without cloak geosets, moved to the regular one so its cloak shows. The Creatures tab reads
+	// the NPC's race, sex, baked skin and customization choices through DBCreatureDisplayExtra; while this
+	// creature is previewed and exported, those reads return the job's values. With new choices the NPC's baked
+	// skin is dropped, so the face, skin and hair colour come from the choices.
+	const set_appearance = (appearance) => {
+		if (typeof require_DBCreatureDisplayExtra !== 'function')
+			throw new Error('appearance: DBCreatureDisplayExtra is not reachable in this wow.export version');
+		const extras = require_DBCreatureDisplayExtra();
+		const get_extra = extras.get_extra, get_choices = extras.get_customization_choices;
+		const choices = Object.entries(appearance.choices || {}).map(([option, choice]) =>
+			({ optionID: Number(option), choiceID: Number(choice) }));
+		extras.get_extra = (id) => {
+			const extra = get_extra(id);
+			if (!extra)
+				return extra;
+			const own = Object.assign({}, extra);
+			if (appearance.race !== undefined)
+				own.DisplayRaceID = appearance.race;
+			if (appearance.sex !== undefined)
+				own.DisplaySexID = appearance.sex;
+			if (choices.length)
+				own.BakeMaterialResourcesID = own.HDBakeMaterialResourcesID = 0;
+			return own;
+		};
+		if (choices.length)
+			extras.get_customization_choices = () => choices;
+		return () => {
+			extras.get_extra = get_extra;
+			extras.get_customization_choices = get_choices;
+		};
+	};
+
 	const export_creatures = async (job, result) => {
 		modules.tab_creatures.setActive();
 		await wait_for('creature list', () => core.view.listfileCreatures?.length > 0 && !core.view.isBusy, 600000, 500);
 		const ctx = make_ctx(modules.tab_creatures);
 		for (const creature of job.creatures) {
-			core.view.config.exportCreatureFormat = creature.format || job.creature_format || 'GLTF';
-			const entry = core.view.listfileCreatures.find((e) => e.endsWith('[' + creature.id + ']'));
-			if (!entry) {
-				result.errors.push('creature not found: ' + creature.id);
-				log('creature not found:', creature.id);
-				continue;
+			const restore = creature.appearance ? set_appearance(creature.appearance) : null;
+			try {
+				await export_creature(ctx, job, result, creature);
+			} finally {
+				if (restore)
+					restore();
 			}
-			core.view.selectionCreatures = [entry];
-			await wait_preview('creature preview ' + creature.id);
-			// wow.export 0.2.19 applies an NPC's equipment geosets (robe skirts, sleeves, boots) only when its
-			// equipment list changes: on the first preview it skips them because is_character_model is still false.
-			// Replacing the list with a copy runs that refresh, and the export takes the preview's geosets.
-			if (Array.isArray(core.view.creatureViewerEquipment) && core.view.creatureViewerEquipment.length) {
-				// equipment_off: inventory slots to take off (1 = head: e.g. an invisible helmet that only hides the hair)
-				const off = new Set(creature.equipment_off || []);
-				core.view.creatureViewerEquipment = core.view.creatureViewerEquipment.map((item) =>
-					Object.assign({}, item, off.has(item.id) ? { checked: false } : {}));
-				await sleep(3000);
-				await wait_preview('creature equipment ' + creature.id);
-			}
-			// geosets_on / geosets_off: geosets to switch on or off after the equipment refresh (it can clear
-			// a whole group, e.g. the hair); a different beard is geosets_on plus geosets_off for the default one
-			const on = creature.geosets_on || [], off = creature.geosets_off || [];
-			if ((on.length || off.length) && Array.isArray(core.view.creatureViewerGeosets)) {
-				for (const geoset of core.view.creatureViewerGeosets) {
-					if (on.includes(geoset.id))
-						geoset.checked = true;
-					if (off.includes(geoset.id))
-						geoset.checked = false;
-				}
-				await wait_preview('creature geosets ' + creature.id);
-			}
-			if (job.log_geosets) {
-				log('equipment', creature.id, JSON.stringify((core.view.creatureViewerEquipment || []).map((e) => e.label + (e.checked ? '+' : '-'))));
-				log('geosets', creature.id, JSON.stringify((core.view.creatureViewerGeosets || []).map((g) => g.id + (g.checked ? '+' : '-'))));
-			}
-			if (core.view.selectionCreatures.length === 0) {
-				result.errors.push('selection was reset: ' + entry);
-				log('selection was reset:', entry);
-				continue;
-			}
-			const before = Date.now() - 1000;
-			await ctx.export_creatures();
-			const main = files_since(path.join(job.export_dir, 'creatures'), before)
-				.filter((f) => /\.(gltf|glb|obj|stl)$/i.test(f));
-			if (main.length !== 1) {
-				result.errors.push('expected one model file for creature ' + creature.id + ', got ' + main.length);
-				log('unexpected output for creature', creature.id, main.length);
-				continue;
-			}
-			own_textures(main[0]);
-			result.assets.push({ key: 'creature:' + creature.id, entry, file: path.relative(job.export_dir, main[0]) });
-			log('exported creature:', entry);
 		}
+	};
+
+	const export_creature = async (ctx, job, result, creature) => {
+		core.view.config.exportCreatureFormat = creature.format || job.creature_format || 'GLTF';
+		const entry = core.view.listfileCreatures.find((e) => e.endsWith('[' + creature.id + ']'));
+		if (!entry) {
+			result.errors.push('creature not found: ' + creature.id);
+			log('creature not found:', creature.id);
+			return;
+		}
+		core.view.selectionCreatures = [entry];
+		await wait_preview('creature preview ' + creature.id);
+		// wow.export 0.2.19 applies an NPC's equipment geosets (robe skirts, sleeves, boots) only when its
+		// equipment list changes: on the first preview it skips them because is_character_model is still false.
+		// Replacing the list with a copy runs that refresh, and the export takes the preview's geosets.
+		if (Array.isArray(core.view.creatureViewerEquipment) && core.view.creatureViewerEquipment.length) {
+			// equipment_off: inventory slots to take off (1 = head: e.g. an invisible helmet that only hides the hair)
+			const off = new Set(creature.equipment_off || []);
+			core.view.creatureViewerEquipment = core.view.creatureViewerEquipment.map((item) =>
+				Object.assign({}, item, off.has(item.id) ? { checked: false } : {}));
+			await sleep(3000);
+			await wait_preview('creature equipment ' + creature.id);
+		}
+		// geosets_on / geosets_off: geosets to switch on or off after the equipment refresh (it can clear
+		// a whole group, e.g. the hair); a different beard is geosets_on plus geosets_off for the default one
+		const on = creature.geosets_on || [], off = creature.geosets_off || [];
+		if ((on.length || off.length) && Array.isArray(core.view.creatureViewerGeosets)) {
+			for (const geoset of core.view.creatureViewerGeosets) {
+				if (on.includes(geoset.id))
+					geoset.checked = true;
+				if (off.includes(geoset.id))
+					geoset.checked = false;
+			}
+			await wait_preview('creature geosets ' + creature.id);
+		}
+		if (job.log_geosets) {
+			log('equipment', creature.id, JSON.stringify((core.view.creatureViewerEquipment || []).map((e) => e.label + (e.checked ? '+' : '-'))));
+			log('geosets', creature.id, JSON.stringify((core.view.creatureViewerGeosets || []).map((g) => g.id + (g.checked ? '+' : '-'))));
+		}
+		if (core.view.selectionCreatures.length === 0) {
+			result.errors.push('selection was reset: ' + entry);
+			log('selection was reset:', entry);
+			return;
+		}
+		const before = Date.now() - 1000;
+		await ctx.export_creatures();
+		const main = files_since(path.join(job.export_dir, 'creatures'), before)
+			.filter((f) => /\.(gltf|glb|obj|stl)$/i.test(f));
+		if (main.length !== 1) {
+			result.errors.push('expected one model file for creature ' + creature.id + ', got ' + main.length);
+			log('unexpected output for creature', creature.id, main.length);
+			return;
+		}
+		own_textures(main[0]);
+		result.assets.push({ key: 'creature:' + creature.id, entry, file: path.relative(job.export_dir, main[0]) });
+		log('exported creature:', entry);
 	};
 
 	// build labels on the source screen start with the product title (wow.export 0.2.19 constants.PRODUCTS)
